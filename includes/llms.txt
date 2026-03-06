@@ -1,6 +1,6 @@
-Plano Docs v0.4.6
+Plano Docs v0.4.11
 llms.txt (auto-generated)
-Generated (UTC): 2026-02-16T08:55:12.843031+00:00
+Generated (UTC): 2026-03-06T02:52:53.418614+00:00
 
 Table of contents
 - Agents (concepts/agents)
@@ -25,6 +25,7 @@ Table of contents
 - Guardrails (guides/prompt_guard)
 - Conversational State (guides/state)
 - Welcome to Plano! (index)
+- CLI Reference (resources/cli_reference)
 - Configuration Reference (resources/configuration_reference)
 - Deployment (resources/deployment)
 - llms.txt (resources/llms_txt)
@@ -171,16 +172,16 @@ version: v0.3.0
 
 agents:
   - id: rag_agent
-    url: http://host.docker.internal:10505
+    url: http://localhost:10505
 
 filters:
   - id: query_rewriter
-    url: http://host.docker.internal:10501
+    url: http://localhost:10501
     # type: mcp # default is mcp
     # transport: streamable-http # default is streamable-http
     # tool: query_rewriter # default name is the filter id
   - id: context_builder
-    url: http://host.docker.internal:10502
+    url: http://localhost:10502
 
 model_providers:
   - model: openai/gpt-4o-mini
@@ -931,7 +932,7 @@ llm_providers:
     access_key: $ANTHROPIC_API_KEY
 
   - model: ollama/llama3.1
-    base_url: http://host.docker.internal:11434
+    base_url: http://localhost:11434
 
 # Define aliases that map to the models above
 model_aliases:
@@ -1841,9 +1842,9 @@ llm_providers:
   - model: ollama/llama3.1
     base_url: http://localhost:11434
 
-  # Ollama in Docker (from host)
+  # Ollama running locally
   - model: ollama/codellama
-    base_url: http://host.docker.internal:11434
+    base_url: http://localhost:11434
 
 OpenAI-Compatible Providers
 
@@ -3074,13 +3075,19 @@ The full agent and backend API implementations used here are available in the pl
 
 Prerequisites
 
-Before you begin, ensure you have the following:
+Plano runs natively by default — no Docker or Rust toolchain required. Pre-compiled binaries are downloaded automatically on first run.
+
+Python (v3.10+)
+
+Supported platforms: Linux (x86_64, aarch64), macOS (Apple Silicon)
+
+Docker mode (optional):
+
+If you prefer to run inside Docker, add --docker to planoai up / planoai down. This requires:
 
 Docker System (v24)
 
 Docker Compose (v2.29)
-
-Python (v3.10+)
 
 Plano’s CLI allows you to manage and interact with the Plano efficiently. To install the CLI, simply run the following command:
 
@@ -3090,13 +3097,13 @@ $ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 Option 1: Install planoai with uv (Recommended)
 
-$ uv tool install planoai==0.4.6
+$ uv tool install planoai==0.4.11
 
 Option 2: Install with pip (Traditional)
 
 $ python -m venv venv
 $ source venv/bin/activate   # On Windows, use: venv\Scripts\activate
-$ pip install planoai==0.4.6
+$ pip install planoai==0.4.11
 
 
 
@@ -3129,15 +3136,16 @@ Step 2. Start plano
 
 Once the config file is created, ensure that you have environment variables set up for ANTHROPIC_API_KEY and OPENAI_API_KEY (or these are defined in a .env file).
 
-Start Plano:
-
 $ planoai up plano_config.yaml
-# Or if installed with uv tool: uvx planoai up plano_config.yaml
-2024-12-05 11:24:51,288 - planoai.main - INFO - Starting plano cli version: 0.4.6
-2024-12-05 11:24:51,825 - planoai.utils - INFO - Schema validation successful!
-2024-12-05 11:24:51,825 - planoai.main - INFO - Starting plano
-...
-2024-12-05 11:25:16,131 - planoai.core - INFO - Container is healthy!
+
+On the first run, Plano automatically downloads Envoy, WASM plugins, and brightstaff and caches them at ~/.plano/.
+
+To stop Plano, run planoai down.
+
+Docker mode (optional):
+
+$ planoai up plano_config.yaml --docker
+$ planoai down --docker
 
 Step 3: Interact with LLM
 
@@ -3217,9 +3225,9 @@ version: v0.1.0
 
 agents:
   - id: flight_agent
-    url: http://host.docker.internal:10520  # your flights service
+    url: http://localhost:10520  # your flights service
   - id: hotel_agent
-    url: http://host.docker.internal:10530  # your hotels service
+    url: http://localhost:10530  # your hotels service
 
 model_providers:
   - model: openai/gpt-4o
@@ -3959,7 +3967,7 @@ scrape_configs:
     scheme: http
     static_configs:
     - targets:
-        - host.docker.internal:19901
+        - localhost:19901
     params:
     format: ["prometheus"]
 
@@ -4134,6 +4142,103 @@ Find inefficient flows: signals.efficiency_score < 0.5
 Find escalations: signals.escalation.requested = "true"
 
 For complete details on all available signals, detection methods, and best practices, see the ../../concepts/signals guide.
+
+Custom Span Attributes
+
+Plano can automatically attach custom span attributes derived from request headers and static attributes
+defined in configuration. This lets you stamp
+traces with identifiers like workspace, tenant, or user IDs without changing application code or adding
+custom instrumentation.
+
+Why This Is Useful
+
+Tenant-aware debugging: Filter traces by workspace.id or tenant.id.
+
+Customer-specific visibility: Attribute performance or errors to a specific customer.
+
+Low overhead: No code changes in agents or clients—just headers.
+
+How It Works
+
+You configure one or more header prefixes. Any incoming HTTP header whose name starts with one of these
+prefixes is captured as a span attribute. You can also provide static attributes that are always injected.
+
+The prefix is only for matching, not the resulting attribute key.
+
+The attribute key is the header name with the prefix removed, then hyphens converted to dots.
+
+Custom span attributes are attached to LLM spans when handling /v1/... requests via llm_chat. For orchestrator requests to /agents/...,
+these attributes are added to both the orchestrator selection span and to each agent span created by agent_chat.
+
+Example
+
+Configured prefix:
+
+tracing:
+  span_attributes:
+    header_prefixes:
+      - x-katanemo-
+
+Incoming headers:
+
+X-Katanemo-Workspace-Id: ws_123
+X-Katanemo-Tenant-Id: ten_456
+
+Resulting span attributes:
+
+workspace.id = "ws_123"
+tenant.id = "ten_456"
+
+Configuration
+
+Add the prefix list under tracing in your config:
+
+tracing:
+  random_sampling: 100
+  span_attributes:
+    header_prefixes:
+      - x-katanemo-
+    static:
+      environment: production
+      service.version: "1.0.0"
+
+Static attributes are always injected alongside any header-derived attributes. If a header-derived
+attribute key matches a static key, the header value overrides the static value.
+
+You can provide multiple prefixes:
+
+tracing:
+  span_attributes:
+    header_prefixes:
+      - x-katanemo-
+      - x-tenant-
+    static:
+      environment: production
+      service.version: "1.0.0"
+
+Notes and Examples
+
+Prefix must match exactly: katanemo- does not match x-katanemo- headers.
+
+Trailing dash is recommended: Without it, x-katanemo would also match x-katanemo-foo and
+x-katanemofoo.
+
+Keys are always strings: Values are captured as string attributes.
+
+Prefix mismatch example
+
+Config:
+
+tracing:
+  span_attributes:
+    header_prefixes:
+      - x-katanemo-
+
+Request headers:
+
+X-Other-User-Id: usr_999
+
+Result: no attributes are captured from X-Other-User-Id.
 
 Benefits of Using Traceparent Headers
 
@@ -4453,63 +4558,7 @@ tools like AWS X-Ray and Datadog, enhancing observability and facilitating faste
 
 Additional Resources
 
-CLI Reference
-
-planoai trace
-
-Trace requests captured by the local OTLP listener.
-
-Synopsis
-
-$ planoai trace [TARGET] [OPTIONS]
-
-Targets
-
-last (default): show the most recent trace.
-
-any: allow interactive selection when available.
-
-<trace-id>: full 32-hex trace ID.
-
-<short-id>: first 8 hex characters.
-
-Options
-
---filter <pattern>: limit displayed attributes to matching keys (supports *).
-
---where <key=value>: match traces containing a specific attribute (repeatable, AND).
-
---list: list trace IDs only.
-
---no-interactive: disable interactive prompts/selections.
-
---limit <n>: limit the number of traces returned.
-
---since <window>: look back window (5m, 2h, 1d).
-
---json: output raw JSON instead of formatted output.
-
---verbose, -v: show all span attributes. By default, inbound/outbound
-spans are displayed in a compact view.
-
-Environment
-
-PLANO_TRACE_PORT: gRPC port used by planoai trace to query traces
-(defaults to 4317).
-
-planoai trace listen
-
-Start a local OTLP/gRPC listener.
-
-Synopsis
-
-$ planoai trace listen [OPTIONS]
-
-Options
-
---host <host>: bind address (default: 0.0.0.0).
-
---port <port>: gRPC listener port (default: 4317).
+For full command documentation (including planoai trace and all other CLI commands), see cli_reference.
 
 External References
 
@@ -4568,9 +4617,9 @@ version: v0.3.0
 
 agents:
   - id: weather_agent
-    url: http://host.docker.internal:10510
+    url: http://localhost:10510
   - id: flight_agent
-    url: http://host.docker.internal:10520
+    url: http://localhost:10520
 
 model_providers:
   - model: openai/gpt-4o
@@ -5595,7 +5644,7 @@ export DB_PASSWORD="your-secure-password"
 # Run Plano or config validation
 ./plano
 
-Special Characters in Passwords: If your password contains special characters like #, @, or &, you must URL-encode them in the connection string. For example, MyPass#123 becomes MyPass%23123.
+Special Characters in Passwords: If your password contains special characters like #, @, or &, you must URL-encode them in the connection string. For example, P@ss#123 becomes P%40ss%23123.
 
 Supabase Connection Strings
 
@@ -5629,12 +5678,12 @@ Example Configuration
 
 state_storage:
   type: postgres
-  connection_string: "postgresql://postgres.myproject:$DB_PASSWORD@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
+  connection_string: "postgresql://postgres.[YOUR-PROJECT-REF]:$DB_PASSWORD@aws-0-[REGION].pooler.supabase.com:5432/postgres"
 
 Then set the environment variable:
 
-# If your password is "MyPass#123", encode it as "MyPass%23123"
-export DB_PASSWORD="MyPass%23123"
+# If your password is "P@ss#123", encode it as "P%40ss%23123"
+export DB_PASSWORD="<your-url-encoded-password>"
 
 Troubleshooting
 
@@ -5716,6 +5765,286 @@ Resources
 
 ---
 
+CLI Reference
+-------------
+Doc: resources/cli_reference
+
+CLI Reference
+
+This reference documents the full planoai command-line interface for day-to-day development, local testing, and operational workflows.
+Use this page as the canonical source for command syntax, options, and recommended usage patterns.
+
+Quick Navigation
+
+cli_reference_global
+
+cli_reference_up
+
+cli_reference_down
+
+cli_reference_build
+
+cli_reference_logs
+
+cli_reference_init
+
+cli_reference_trace
+
+cli_reference_prompt_targets
+
+cli_reference_cli_agent
+
+
+
+Global CLI Usage
+
+Command
+
+$ planoai [COMMAND] [OPTIONS]
+
+Common global options
+
+--help: Show the top-level command menu.
+
+--version: Show installed CLI version and update status.
+
+Help patterns
+
+$ planoai --help
+$ planoai trace --help
+$ planoai init --help
+
+planoai default command screenshot
+
+planoai command showing the top-level command menu.
+
+
+
+planoai up
+
+Start Plano using a configuration file.
+
+Synopsis
+
+$ planoai up [FILE] [--path <dir>] [--foreground] [--with-tracing] [--tracing-port <port>]
+
+Arguments
+
+FILE (optional): explicit path to config file.
+
+Options
+
+--path <dir>: directory to search for config (default .).
+
+--foreground: run Plano in foreground.
+
+--with-tracing: start local OTLP/gRPC trace collector.
+
+--tracing-port <port>: collector port (default 4317).
+
+If you use --with-tracing, ensure that port 4317 is free and not already in use by Jaeger or any other observability services or processes. If port 4317 is occupied, the command will fail to start the trace collector.
+
+Examples
+
+$ planoai up config.yaml
+$ planoai up --path ./deploy
+$ planoai up --with-tracing
+$ planoai up --with-tracing --tracing-port 4318
+
+
+
+planoai down
+
+Stop Plano (container/process stack managed by the CLI).
+
+Synopsis
+
+$ planoai down
+
+
+
+planoai build
+
+Build Plano Docker image from repository source.
+
+Synopsis
+
+$ planoai build
+
+
+
+planoai logs
+
+Stream Plano logs.
+
+Synopsis
+
+$ planoai logs [--follow] [--debug]
+
+Options
+
+--follow: stream logs continuously.
+
+--debug: include additional gateway/debug streams.
+
+Examples
+
+$ planoai logs
+$ planoai logs --follow
+$ planoai logs --follow --debug
+
+
+
+planoai init
+
+Generate a new config.yaml using an interactive wizard, built-in templates, or a clean empty file.
+
+Synopsis
+
+$ planoai init [--template <id> | --clean] [--output <path>] [--force] [--list-templates]
+
+Options
+
+--template <id>: create config from a built-in template id.
+
+--clean: create an empty config file.
+
+--output, -o <path>: output path (default config.yaml).
+
+--force: overwrite existing output file.
+
+--list-templates: print available template IDs and exit.
+
+Examples
+
+$ planoai init
+$ planoai init --list-templates
+$ planoai init --template coding_agent_routing
+$ planoai init --clean --output ./config/config.yaml
+
+planoai init command screenshot
+
+planoai init --list-templates showing built-in starter templates.
+
+
+
+planoai trace
+
+Inspect request traces from the local OTLP listener.
+
+Synopsis
+
+$ planoai trace [TARGET] [OPTIONS]
+
+Targets
+
+last (default): show most recent trace.
+
+any: consider all traces (interactive selection when terminal supports it).
+
+listen: start local OTLP listener.
+
+down: stop background listener.
+
+<trace-id>: full 32-hex trace id.
+
+<short-id>: first 8 hex chars of trace id.
+
+Display options
+
+--filter <pattern>: keep only matching attribute keys (supports * via “glob” syntax).
+
+--where <key=value>: locate traces containing key/value (repeatable, AND semantics).
+
+--list: list trace IDs instead of full trace output (use with --no-interactive to fetch plain-text trace IDs only).
+
+--no-interactive: disable interactive selection prompts.
+
+--limit <n>: limit returned traces.
+
+--since <window>: lookback window such as 5m, 2h, 1d.
+
+--json: emit JSON payloads.
+
+--verbose, -v: show full attribute output (disable compact trimming). Useful for debugging internal attributes.
+
+Listener options (for ``TARGET=listen``)
+
+--host <host>: bind host (default 0.0.0.0).
+
+--port <port>: bind port (default 4317).
+
+When using listen, ensure that port 4317 is free and not already in use by Jaeger or any other observability services or processes. If port 4317 is occupied, the command will fail to start the trace collector. You cannot use other services on the same port when running.
+
+Environment
+
+PLANO_TRACE_PORT: query port used by planoai trace when reading traces (default 4317).
+
+Examples
+
+# Start/stop listener
+$ planoai trace listen
+$ planoai trace down
+
+# Basic inspection
+$ planoai trace
+$ planoai trace 7f4e9a1c
+$ planoai trace 7f4e9a1c0d9d4a0bb9bf5a8a7d13f62a
+
+# Filtering and automation
+$ planoai trace --where llm.model=openai/gpt-5.2 --since 30m
+$ planoai trace --filter "http.*"
+$ planoai trace --list --limit 5
+$ planoai trace --where http.status_code=500 --json
+
+planoai trace command screenshot
+
+planoai trace command showing trace inspection and filtering capabilities.
+
+Operational notes
+
+--host and --port are valid only when TARGET is listen.
+
+--list cannot be combined with a specific trace-id target.
+
+
+
+planoai prompt_targets
+
+Generate prompt-target metadata from Python methods.
+
+Synopsis
+
+$ planoai prompt_targets --file <python-file>
+
+Options
+
+--file, --f <python-file>: required path to a .py source file.
+
+
+
+planoai cli_agent
+
+Start an interactive CLI agent session against a running Plano deployment.
+
+Synopsis
+
+$ planoai cli_agent claude [FILE] [--path <dir>] [--settings '<json>']
+
+Arguments
+
+type: currently claude.
+
+FILE (optional): config file path.
+
+Options
+
+--path <dir>: directory containing config file.
+
+--settings <json>: JSON settings payload for agent startup.
+
+---
+
 Configuration Reference
 -----------------------
 Doc: resources/configuration_reference
@@ -5734,15 +6063,15 @@ version: v0.3.0
 # External HTTP agents - API type is controlled by request path (/v1/responses, /v1/messages, /v1/chat/completions)
 agents:
   - id: weather_agent # Example agent for weather
-    url: http://host.docker.internal:10510
+    url: http://localhost:10510
 
   - id: flight_agent # Example agent for flights
-    url: http://host.docker.internal:10520
+    url: http://localhost:10520
 
 # MCP filters applied to requests/responses (e.g., input validation, query rewriting)
 filters:
   - id: input_guards # Example filter for input validation
-    url: http://host.docker.internal:10500
+    url: http://localhost:10500
     # type: mcp (default)
     # transport: streamable-http (default)
     # tool: input_guards (default - same as filter id)
@@ -5845,7 +6174,39 @@ Doc: resources/deployment
 
 Deployment
 
-This guide shows how to deploy Plano directly using Docker without the plano CLI, including basic runtime checks for routing and health monitoring.
+Plano can be deployed in two ways: natively on the host (default) or inside a Docker container.
+
+Native Deployment (Default)
+
+Plano runs natively by default. Pre-compiled binaries (Envoy, WASM plugins, brightstaff) are automatically downloaded on the first run and cached at ~/.plano/.
+
+Supported platforms: Linux (x86_64, aarch64), macOS (Apple Silicon).
+
+Start Plano
+
+planoai up plano_config.yaml
+
+Options:
+
+--foreground — stay attached and stream logs (Ctrl+C to stop)
+
+--with-tracing — start a local OTLP trace collector
+
+Runtime files (rendered configs, logs, PID file) are stored in ~/.plano/run/.
+
+Stop Plano
+
+planoai down
+
+Build from Source (Developer)
+
+If you want to build from source instead of using pre-compiled binaries, you need:
+
+Rust with the wasm32-wasip1 target
+
+OpenSSL dev headers (libssl-dev on Debian/Ubuntu, openssl on macOS)
+
+planoai build --native
 
 Docker Deployment
 
@@ -5862,7 +6223,7 @@ Create a docker-compose.yml file with the following configuration:
 # docker-compose.yml
 services:
   plano:
-    image: katanemo/plano:0.4.6
+    image: katanemo/plano:0.4.11
     container_name: plano
     ports:
       - "10000:10000" # ingress (client -> plano)
@@ -5884,6 +6245,11 @@ Check container health and logs:
 
 docker compose ps
 docker compose logs -f plano
+
+You can also use the CLI with Docker mode:
+
+planoai up plano_config.yaml --docker
+planoai down --docker
 
 Runtime Tests
 
@@ -6025,6 +6391,114 @@ Also, Plano utilizes Envoy event-based thread model. A main thread is responsibl
 
 Worker threads rarely share state and operate in a trivially parallel fashion. This threading model
 enables scaling to very high core count CPUs.
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                    P L A N O                                        │
+│                  AI-native proxy and data plane for agentic applications            │
+│                                                                                     │
+│                              ┌─────────────────────┐                                │
+│                              │    YOUR CLIENTS     │                                │
+│                              │ (apps· agents · UI) │                                │
+│                              └──────────┬──────────┘                                │
+│                                         │                                           │
+│          ┌──────────────────────────────┼──────────────────────────┐                │
+│          │                              │                          │                │
+│   ┌──────▼──────────┐         ┌─────────▼────────┐       ┌────────▼─────────┐       │
+│   │  Agent Port(s)  │         │   Model Port     │       │  Function-Call   │       │
+│   │  :8001+         │         │   :12000         │       │  Port  :10000    │       │
+│   │                 │         │                  │       │                  │       │
+│   │  route your     │         │  direct LLM      │       │  prompt-target / │       │
+│   │  prompts to     │         │  calls with      │       │  tool dispatch   │       │
+│   │  the right      │         │  model-alias     │       │  with parameter  │       │
+│   │  agent          │         │  translation     │       │  extraction      │       │
+│   └──────┬──────────┘         └─────────┬────────┘       └────────┬─────────┘       │
+│          └──────────────────────────────┼─────────────────────────┘                 │
+│                                         │                                           │
+│  ╔══════════════════════════════════════▼══════════════════════════════════════╗    │
+│  ║            BRIGHTSTAFF (SUBSYSTEM) —  Agentic Control Plane                 ║    │
+│  ║            Async · non-blocking · parallel per-request Tokio tasks          ║    │
+│  ║                                                                             ║    │
+│  ║   ┌─────────────────────────────────────────────────────────────────────┐   ║    │
+│  ║   │  Agentic ROUTER                                                     │   ║    │
+│  ║   │  Reads listener config · maps incoming request to execution path    │   ║    │
+│  ║   │                                                                     │   ║    │
+│  ║   │   /agents/*  ──────────────────────►  AGENT PATH                    │   ║    │
+│  ║   │   /v1/chat|messages|responses ──────►  LLM PATH                     │   ║    │
+│  ║   └─────────────────────────────────────────────────────────────────────┘   ║    │
+│  ║                                                                             ║    │
+│  ║   ─────────────────────── AGENT PATH ────────────────────────────────────   ║    │
+│  ║                                                                             ║    │
+│  ║   ┌──────────────────────────────────────────────────────────────────────┐  ║    │
+│  ║   │  FILTER CHAIN                        (pipeline_processor.rs)         │  ║    │
+│  ║   │                                                                      │  ║    │
+│  ║   │  prompt ──► [input_guards] ──► [query_rewrite] ──► [context_builder] │  ║    │
+│  ║   │             guardrails       prompt mutation      RAG / enrichment   │  ║    │
+│  ║   │                                                                      │  ║    │
+│  ║   │  Each filter: HTTP or MCP · can mutate, enrich, or short-circuit     │  ║    │
+│  ║   └──────────────────────────────────┬───────────────────────────────────┘  ║    │
+│  ║                                      │                                      ║    │
+│  ║   ┌──────────────────────────────────▼───────────────────────────────────┐  ║    │
+│  ║   │  AGENT ORCHESTRATOR               (agent_chat_completions.rs)        │  ║    │
+│  ║   │  Select agent · forward enriched request · manage conversation state │  ║    │
+│  ║   │  Stream response back · multi-turn aware                             │  ║    │
+│  ║   └──────────────────────────────────────────────────────────────────────┘  ║    │
+│  ║                                                                             ║    │
+│  ║   ─────────────────────── LLM PATH ──────────────────────────────────────   ║    │
+│  ║                                                                             ║    │
+│  ║   ┌──────────────────────────────────────────────────────────────────────┐  ║    │
+│  ║   │  MODEL ROUTER                       (llm_router.rs + router_chat.rs) │  ║    │
+│  ║   │  Model alias resolution · preference-based provider selection        │  ║    │
+│  ║   │  "fast-llm" → gpt-4o-mini  ·  "smart-llm" → gpt-4o                   │  ║    │
+│  ║   └──────────────────────────────────────────────────────────────────────┘  ║    │
+│  ║                                                                             ║    │
+│  ║   ─────────────────── ALWAYS ON (every request) ─────────────────────────   ║    │
+│  ║                                                                             ║    │
+│  ║   ┌────────────────────┐  ┌─────────────────────┐  ┌──────────────────┐     ║    │
+│  ║   │  SIGNALS ANALYZER  │  │   STATE STORAGE     │  │  OTEL TRACING    │     ║    │
+│  ║   │  loop detection    │  │   memory / postgres │  │  traceparent     │     ║    │
+│  ║   │  repetition score  │  │   /v1/responses     │  │  span injection  │     ║    │
+│  ║   │  quality indicators│  │   stateful API      │  │  trace export    │     ║    │
+│  ║   └────────────────────┘  └─────────────────────┘  └──────────────────┘     ║    │
+│  ╚═════════════════════════════════════╤═══════════════════════════════════════╝    │
+│                                        │                                            │
+│  ┌─────────────────────────────────────▼──────────────────────────────────────┐     │
+│  │  LLM GATEWAY   (llm_gateway.wasm — embedded in Envoy egress filter chain)  │     │
+│  │                                                                            │     │
+│  │  Rate limiting  ·  Provider format translation  ·  TTFT metrics            │     │
+│  │  OpenAI → Anthropic · Gemini · Mistral · Groq · DeepSeek · xAI · Bedrock   │     │
+│  │                                                                            │     │
+│  │  Envoy handles beneath this: TLS origination · SNI · retry + backoff       │     │
+│  │  connection pooling · LOGICAL_DNS · structured access logs                 │     │
+│  └─────────────────────────────────────┬──────────────────────────────────────┘     │
+│                                         │                                           │
+└─────────────────────────────────────────┼───────────────────────────────────────────┘
+                                          │
+              ┌───────────────────────────┼────────────────────────────┐
+              │                           │                             │
+    ┌─────────▼──────────┐   ┌────────────▼──────────┐   ┌────────────▼──────────┐
+    │  LLM PROVIDERS     │   │  EXTERNAL AGENTS      │   │  TOOL / API BACKENDS  │
+    │  OpenAI · Anthropic│   │  (filter chain svc)   │   │  (endpoint clusters)  │
+    │  Gemini · Mistral  │   │  HTTP / MCP  :10500+  │   │  user-defined hosts   │
+    │  Groq · DeepSeek   │   │  input_guards         │   │                       │
+    │  xAI · Together.ai │   │  query_rewriter       │   │                       │
+    └────────────────────┘   │  context_builder      │   └───────────────────────┘
+                             └───────────────────────┘
+
+
+  HOW PLANO IS DIFFERENT
+  ─────────────────────────────────────────────────────────────────────────────────
+  Brightstaff is the entire agentic brain — one async Rust binary that handles
+  agent selection, filter chain orchestration, model routing, state, and signals
+  without blocking a thread per request.
+
+  Filter chains are programmable dataplane steps — reusable HTTP/MCP services
+  you wire into any agent, executing in-path before the agent ever sees the prompt.
+
+  The LLM gateway is a zero-overhead WASM plugin inside Envoy — format translation
+  and rate limiting happen in-process with the proxy, not as a separate service hop.
+
+  Envoy provides the transport substrate (TLS, HTTP codecs, retries, connection
+  pools, access logs) so Plano never reimplements solved infrastructure problems.
 
 Request Flow (Ingress)
 
